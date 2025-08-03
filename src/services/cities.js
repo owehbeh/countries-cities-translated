@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { cacheGet, cacheSet } = require('../config/redis');
+const { cacheGet, cacheSet, cacheDelete } = require('../config/redis');
 const { translateCityNames } = require('./translation');
 const { getCountryByCode } = require('./countries');
 
@@ -28,7 +28,9 @@ const getCitiesFromAPI = async (countryCode) => {
       longitude: city.longitude
     }));
 
-    await cacheSet(cacheKey, cities, 0); // No expiration - persist forever
+    // Cache empty results for shorter time (1 hour) vs full results (forever)
+    const expiration = cities.length === 0 ? 3600 : 0;
+    await cacheSet(cacheKey, cities, expiration);
     return cities;
   } catch (error) {
     console.error(`Error fetching cities for ${countryCode}:`, error.message);
@@ -107,9 +109,29 @@ const getAllCitiesForCountry = async (countryCode, languageCode = 'en') => {
   return await getCitiesWithTranslation(countryCode, languageCode, null);
 };
 
+const clearCityCache = async (countryCode) => {
+  try {
+    const rawCacheKey = `cities_raw:${countryCode.toLowerCase()}`;
+    await cacheDelete(rawCacheKey);
+    
+    // Clear all translated cache entries for this country (approximate - clears common languages)
+    const languages = ['en', 'ar', 'fr', 'es', 'de', 'it', 'pt', 'ru', 'zh', 'ja'];
+    const clearPromises = languages.map(lang => 
+      cacheDelete(`cities_translated:${countryCode.toLowerCase()}:${lang}:all`)
+    );
+    await Promise.all(clearPromises);
+    
+    return true;
+  } catch (error) {
+    console.error(`Error clearing cache for ${countryCode}:`, error);
+    return false;
+  }
+};
+
 module.exports = {
   getCitiesFromAPI,
   getCitiesWithTranslation,
   searchCities,
-  getAllCitiesForCountry
+  getAllCitiesForCountry,
+  clearCityCache
 };

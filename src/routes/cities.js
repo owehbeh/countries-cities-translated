@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const {
   searchCities,
-  getAllCitiesForCountry
+  getAllCitiesForCountry,
+  clearCityCache
 } = require('../services/cities');
 
 router.get('/search', async (req, res) => {
@@ -99,6 +100,33 @@ router.get('/', async (req, res) => {
       searchWithQueryParams: '/api/cities/search?country=LB&q=beirut&lang=ar'
     }
   });
+});
+
+router.delete('/:countryCode/cache', async (req, res) => {
+  try {
+    const { countryCode } = req.params;
+    
+    const success = await clearCityCache(countryCode);
+    
+    if (success) {
+      res.json({
+        success: true,
+        message: `Cache cleared for country ${countryCode.toUpperCase()}`
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to clear cache',
+        message: `Could not clear cache for country ${countryCode.toUpperCase()}`
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Cache clearing failed',
+      message: error.message
+    });
+  }
 });
 
 module.exports = router;
