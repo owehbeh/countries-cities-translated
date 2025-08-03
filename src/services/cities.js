@@ -66,16 +66,8 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
     }
 
     let cities = await getCitiesFromLocalData(countryCode);
-
-    if (searchQuery) {
-      const lowerQuery = searchQuery.toLowerCase();
-      cities = cities.filter(city => 
-        city.name.toLowerCase().includes(lowerQuery) ||
-        (city.stateName && city.stateName.toLowerCase().includes(lowerQuery))
-      );
-    }
-
     let translatedCities = cities;
+
     if (languageCode !== 'en' && cities.length > 0) {
       try {
         translatedCities = await translateCityNames(cities, languageCode, 'en');
@@ -87,6 +79,23 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
           translationError: true
         }));
       }
+    }
+
+    if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
+      translatedCities = translatedCities.filter(city => {
+        // Search in original English name
+        const matchesOriginal = (city.originalName || city.name).toLowerCase().includes(lowerQuery);
+        
+        // Search in translated name (if different from original)
+        const matchesTranslated = languageCode !== 'en' && 
+          city.name.toLowerCase().includes(lowerQuery);
+        
+        // Search in state/subdivision name
+        const matchesState = city.stateName && city.stateName.toLowerCase().includes(lowerQuery);
+        
+        return matchesOriginal || matchesTranslated || matchesState;
+      });
     }
 
     const result = {

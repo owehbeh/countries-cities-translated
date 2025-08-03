@@ -49,8 +49,14 @@ const formatCountryResponse = async (country, languages = ['en'], includeFlagDat
     names: {}
   };
 
+  // Always include English name
+  if (country.en) {
+    response.names.en = country.en;
+  }
+
+  // Add other requested languages (avoid duplicates)
   languages.forEach(lang => {
-    if (country[lang]) {
+    if (lang !== 'en' && country[lang]) {
       response.names[lang] = country[lang];
     }
   });
@@ -89,8 +95,11 @@ const searchCountries = async (query, languages = ['en'], includeFlagDataUrl = f
 
   const lowerQuery = query.toLowerCase();
   
+  // Search in requested languages + always include English
+  const searchLanguages = [...new Set([...validLanguages, 'en'])];
+  
   const filteredCountries = countries.filter(country => {
-    return validLanguages.some(lang => {
+    return searchLanguages.some(lang => {
       const name = country[lang];
       return name && name.toLowerCase().includes(lowerQuery);
     }) || 
