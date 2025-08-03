@@ -7,6 +7,10 @@ services:
       - "3000"
     ports:
       - "3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.web.loadbalancer.server.port=3000"
+      - "coolify=true"
     environment:
       - NODE_ENV=production
       - PORT=3000
