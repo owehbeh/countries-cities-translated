@@ -41,9 +41,11 @@ REDIS_PASSWORD=your-redis-password
 - `GET /api/countries/search?q=United&lang=en` - Search countries
 - `GET /api/countries/US?lang=ar&flag=true` - Get country by code
 
-### Cities
-- `GET /api/cities/LB?lang=ar` - All cities for Lebanon in Arabic
-- `GET /api/cities/LB?q=beirut&lang=ar` - Search cities
+### Cities/Subdivisions
+- `GET /api/cities/LB?lang=ar` - All subdivisions for Lebanon in Arabic
+- `GET /api/cities/LB?q=beirut&lang=ar` - Search subdivisions
+- `GET /api/cities/QA?lang=ar` - Qatar municipalities in Arabic
+- `DELETE /api/cities/QA/cache` - Clear cache for Qatar
 
 ### Supported Languages
 37 languages supported: `ar`, `bg`, `br`, `cs`, `da`, `de`, `el`, `en`, `eo`, `es`, `et`, `eu`, `fa`, `fi`, `fr`, `hr`, `hu`, `hy`, `it`, `ja`, `ko`, `lt`, `nl`, `no`, `pl`, `pt`, `ro`, `ru`, `sk`, `sl`, `sr`, `sv`, `th`, `tr`, `uk`, `zh`, `zh-tw`
@@ -85,8 +87,9 @@ docker-compose up -d
 }
 ```
 
-## 💾 Data Persistence
+## 💾 Data & Caching
 
+- **Local subdivision data**: Uses built-in JSON files for cities/subdivisions
 - **Redis caching**: All translations cached permanently
 - **Data survives restarts**: Redis configured with AOF + RDB persistence
 - **Cost optimization**: Google Cloud Translation called only once per translation
@@ -100,6 +103,7 @@ docker-compose up -d
 ## 📈 Architecture
 
 - **Express.js** - REST API framework
+- **Local JSON data** - Built-in countries and subdivisions database
 - **Redis** - Translation caching layer
 - **Google Cloud Translation** - Real-time translation
 - **Docker Compose** - Container orchestration

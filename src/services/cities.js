@@ -1,9 +1,20 @@
-const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const { cacheGet, cacheSet, cacheDelete } = require('../config/redis');
 const { translateCityNames } = require('./translation');
 const { getCountryByCode } = require('./countries');
 
-const getCitiesFromAPI = async (countryCode) => {
+let subdivisionsData = null;
+
+const loadSubdivisions = () => {
+  if (!subdivisionsData) {
+    const subdivisionsPath = path.join(__dirname, '../../assets/subdivisions/subdivisions.json');
+    subdivisionsData = JSON.parse(fs.readFileSync(subdivisionsPath, 'utf8'));
+  }
+  return subdivisionsData;
+};
+
+const getCitiesFromLocalData = async (countryCode) => {
   try {
     const cacheKey = `cities_raw:${countryCode.toLowerCase()}`;
     const cached = await cacheGet(cacheKey);
@@ -11,21 +22,20 @@ const getCitiesFromAPI = async (countryCode) => {
       return cached;
     }
 
-    const apiUrl = `https://api.countrystatecity.in/v1/countries/${countryCode.toUpperCase()}/cities`;
-    const response = await axios.get(apiUrl, {
-      headers: {
-        'X-CSCAPI-KEY': process.env.COUNTRY_STATE_CITY_API_KEY || 'demo-key'
-      }
-    });
+    const subdivisions = loadSubdivisions();
+    const countrySubdivisions = subdivisions.filter(
+      sub => sub.country === countryCode.toUpperCase()
+    );
 
-    const cities = response.data.map(city => ({
-      id: city.id,
-      name: city.name,
-      stateCode: city.state_code,
-      stateName: city.state_name,
-      countryCode: city.country_code,
-      latitude: city.latitude,
-      longitude: city.longitude
+    const cities = countrySubdivisions.map((subdivision, index) => ({
+      id: index + 1,
+      name: subdivision.name,
+      stateCode: subdivision.code.split('-')[1],
+      stateName: subdivision.name,
+      countryCode: subdivision.country,
+      latitude: null,
+      longitude: null,
+      type: subdivision.type
     }));
 
     // Cache empty results for shorter time (1 hour) vs full results (forever)
@@ -33,7 +43,7 @@ const getCitiesFromAPI = async (countryCode) => {
     await cacheSet(cacheKey, cities, expiration);
     return cities;
   } catch (error) {
-    console.error(`Error fetching cities for ${countryCode}:`, error.message);
+    console.error(`Error loading cities for ${countryCode}:`, error.message);
     throw error;
   }
 };
@@ -55,7 +65,7 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
       };
     }
 
-    let cities = await getCitiesFromAPI(countryCode);
+    let cities = await getCitiesFromLocalData(countryCode);
 
     if (searchQuery) {
       const lowerQuery = searchQuery.toLowerCase();
@@ -129,7 +139,7 @@ const clearCityCache = async (countryCode) => {
 };
 
 module.exports = {
-  getCitiesFromAPI,
+  getCitiesFromLocalData,
   getCitiesWithTranslation,
   searchCities,
   getAllCitiesForCountry,
