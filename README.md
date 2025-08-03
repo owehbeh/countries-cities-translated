@@ -46,6 +46,7 @@ REDIS_PASSWORD=your-redis-password
 - `GET /api/cities/LB?q=beirut&lang=ar` - Search subdivisions
 - `GET /api/cities/QA?lang=ar` - Qatar municipalities in Arabic
 - `DELETE /api/cities/QA/cache` - Clear cache for Qatar
+- `DELETE /api/cities/cache/all` - Clear all cities cache
 
 ### Supported Languages
 37 languages supported: `ar`, `bg`, `br`, `cs`, `da`, `de`, `el`, `en`, `eo`, `es`, `et`, `eu`, `fa`, `fi`, `fr`, `hr`, `hu`, `hy`, `it`, `ja`, `ko`, `lt`, `nl`, `no`, `pl`, `pt`, `ro`, `ru`, `sk`, `sl`, `sr`, `sv`, `th`, `tr`, `uk`, `zh`, `zh-tw`

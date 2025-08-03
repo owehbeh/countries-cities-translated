@@ -147,10 +147,41 @@ const clearCityCache = async (countryCode) => {
   }
 };
 
+const clearAllCitiesCache = async () => {
+  try {
+    const { getRedisClient } = require('../config/redis');
+    const client = getRedisClient();
+    
+    // Get all cache keys matching cities patterns
+    const rawKeys = await client.keys('cities_raw:*');
+    const translatedKeys = await client.keys('cities_translated:*');
+    
+    const allKeys = [...rawKeys, ...translatedKeys];
+    
+    if (allKeys.length > 0) {
+      await client.del(allKeys);
+      console.log(`Cleared ${allKeys.length} cities cache entries`);
+    }
+    
+    return {
+      success: true,
+      clearedKeys: allKeys.length,
+      message: `Cleared ${allKeys.length} cities cache entries`
+    };
+  } catch (error) {
+    console.error('Error clearing all cities cache:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
 module.exports = {
   getCitiesFromLocalData,
   getCitiesWithTranslation,
   searchCities,
   getAllCitiesForCountry,
-  clearCityCache
+  clearCityCache,
+  clearAllCitiesCache
 };
