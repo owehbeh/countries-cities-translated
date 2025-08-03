@@ -16,3 +16,5 @@ logs
 Dockerfile
 docker-compose.yml
 .dockerignore
+# Ensure assets directory is included
+!assets/

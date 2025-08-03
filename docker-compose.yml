@@ -21,8 +21,6 @@ services:
       - COUNTRY_STATE_CITY_API_KEY=${COUNTRY_STATE_CITY_API_KEY}
       - ALLOWED_API_KEYS=${ALLOWED_API_KEYS:-}
       - ALLOWED_IPS=${ALLOWED_IPS:-}
-    volumes:
-      - ./assets:/app/assets:ro
     depends_on:
       - redis
     restart: unless-stopped
