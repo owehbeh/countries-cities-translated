@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: countries-cities-api
     ports:
       - "3000"
     labels:
@@ -34,6 +35,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: countries-cities-redis
     expose:
       - "6379"
     command: >
