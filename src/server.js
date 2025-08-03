@@ -54,20 +54,30 @@ app.use('/api/cities', citiesRoutes);
 app.use(errorHandler);
 
 const startServer = async () => {
-  try {
-    await connectRedis();
-    console.log('Redis connected successfully');
-    
-    initializeTranslation();
-    
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`API Documentation: http://localhost:${PORT}`);
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      await connectRedis();
+      console.log('Redis connected successfully');
+      
+      initializeTranslation();
+      
+      app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+        console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`API Documentation: http://localhost:${PORT}`);
+      });
+      return;
+    } catch (error) {
+      retries--;
+      console.error(`Failed to connect to Redis. Retries left: ${retries}`, error.message);
+      if (retries === 0) {
+        console.error('Failed to start server after multiple attempts');
+        process.exit(1);
+      }
+      console.log('Retrying in 5 seconds...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
   }
 };
 

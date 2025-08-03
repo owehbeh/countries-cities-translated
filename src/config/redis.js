@@ -4,23 +4,20 @@ let client;
 
 const connectRedis = async () => {
   try {
-    client = redis.createClient({
-      host: process.env.REDIS_HOST || 'redis',
-      port: process.env.REDIS_PORT || 6379,
-      password: process.env.REDIS_PASSWORD || null,
-      retry_strategy: (options) => {
-        if (options.error && options.error.code === 'ECONNREFUSED') {
-          return new Error('Redis server refused connection');
-        }
-        if (options.total_retry_time > 1000 * 60 * 60) {
-          return new Error('Retry time exhausted');
-        }
-        if (options.attempt > 10) {
-          return undefined;
-        }
-        return Math.min(options.attempt * 100, 3000);
+    const redisConfig = {
+      socket: {
+        host: process.env.REDIS_HOST || 'redis',
+        port: process.env.REDIS_PORT || 6379,
+        reconnectDelay: 100,
+        connectTimeout: 10000
       }
-    });
+    };
+
+    if (process.env.REDIS_PASSWORD) {
+      redisConfig.password = process.env.REDIS_PASSWORD;
+    }
+
+    client = redis.createClient(redisConfig);
 
     client.on('error', (err) => {
       console.error('Redis Client Error:', err);
@@ -38,10 +35,20 @@ const connectRedis = async () => {
       console.log('Redis connection closed');
     });
 
+    client.on('reconnecting', () => {
+      console.log('Redis client reconnecting...');
+    });
+
     await client.connect();
+    console.log(`Redis connected to ${redisConfig.socket.host}:${redisConfig.socket.port}`);
     return client;
   } catch (error) {
     console.error('Failed to connect to Redis:', error);
+    console.error('Redis config:', {
+      host: process.env.REDIS_HOST || 'redis',
+      port: process.env.REDIS_PORT || 6379,
+      hasPassword: !!process.env.REDIS_PASSWORD
+    });
     throw error;
   }
 };
@@ -66,7 +73,7 @@ const cacheGet = async (key) => {
     return result ? JSON.parse(result) : null;
   } catch (error) {
     console.error('Redis GET error:', error);
-    return null;
+    throw error;
   }
 };
 
@@ -82,7 +89,7 @@ const cacheSet = async (key, value, expiration = 0) => {
     return true;
   } catch (error) {
     console.error('Redis SET error:', error);
-    return false;
+    throw error;
   }
 };
 

@@ -20,7 +20,8 @@ services:
     volumes:
       - ./assets:/app/assets:ro
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
