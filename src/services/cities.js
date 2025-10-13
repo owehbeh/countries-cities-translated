@@ -6,6 +6,106 @@ const { getCountryByCode } = require('./countries');
 
 let subdivisionsData = null;
 
+const normalizeForSearch = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  return value
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’'`´ˊˋ]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .toLowerCase();
+};
+
+const levenshteinDistance = (a, b) => {
+  if (a === b) {
+    return 0;
+  }
+  if (!a.length) {
+    return b.length;
+  }
+  if (!b.length) {
+    return a.length;
+  }
+
+  const matrix = Array.from({ length: a.length + 1 }, () =>
+    Array(b.length + 1).fill(0)
+  );
+
+  for (let i = 0; i <= a.length; i++) {
+    matrix[i][0] = i;
+  }
+  for (let j = 0; j <= b.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + 1
+        );
+      }
+    }
+  }
+
+  return matrix[a.length][b.length];
+};
+
+const matchesSearchTerm = (value, rawLowerQuery, normalizedQuery) => {
+  if (!value) {
+    return false;
+  }
+
+  const lowerValue = value.toString().toLowerCase();
+  if (rawLowerQuery && lowerValue.includes(rawLowerQuery)) {
+    return true;
+  }
+
+  const normalizedValue = normalizeForSearch(value);
+  if (!normalizedValue) {
+    return false;
+  }
+
+  if (normalizedQuery && normalizedValue.includes(normalizedQuery)) {
+    return true;
+  }
+
+  if (!normalizedQuery || normalizedQuery.length < 4) {
+    return false;
+  }
+
+  const tokens = normalizedValue.split(' ').filter(Boolean);
+  const firstLetter = normalizedQuery[0];
+  const maxAllowedDistance = (length) => {
+    if (length <= 3) {
+      return 0;
+    }
+    return Math.max(2, Math.ceil(Math.max(length, normalizedQuery.length) * 0.4));
+  };
+
+  return tokens.some(token => {
+    if (!token) {
+      return false;
+    }
+
+    if (token[0] !== firstLetter) {
+      return false;
+    }
+
+    const distance = levenshteinDistance(token, normalizedQuery);
+    return distance <= maxAllowedDistance(token.length);
+  });
+};
+
 const loadSubdivisions = () => {
   if (!subdivisionsData) {
     const subdivisionsPath = path.join(__dirname, '../../assets/subdivisions/subdivisions.json');
@@ -83,18 +183,23 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
 
     if (searchQuery) {
       const lowerQuery = searchQuery.toLowerCase();
+      const normalizedQuery = normalizeForSearch(searchQuery);
       translatedCities = translatedCities.filter(city => {
         // Search in original English name
-        const matchesOriginal = (city.originalName || city.name).toLowerCase().includes(lowerQuery);
+        const originalName = city.originalName || city.name;
+        const matchesOriginal = matchesSearchTerm(originalName, lowerQuery, normalizedQuery);
         
         // Search in translated name (if different from original)
-        const matchesTranslated = languageCode !== 'en' && 
-          city.name.toLowerCase().includes(lowerQuery);
+        const matchesTranslated = languageCode !== 'en' &&
+          matchesSearchTerm(city.name, lowerQuery, normalizedQuery);
         
         // Search in state/subdivision name
-        const matchesState = city.stateName && city.stateName.toLowerCase().includes(lowerQuery);
-        
-        return matchesOriginal || matchesTranslated || matchesState;
+        const matchesState = city.stateName && matchesSearchTerm(city.stateName, lowerQuery, normalizedQuery);
+
+        // Search in state code (e.g., LB-BA)
+        const matchesStateCode = city.stateCode && matchesSearchTerm(city.stateCode, lowerQuery, normalizedQuery);
+
+        return matchesOriginal || matchesTranslated || matchesState || matchesStateCode;
       });
     }
 
