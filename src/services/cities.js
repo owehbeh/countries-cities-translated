@@ -1,10 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { cacheGet, cacheSet, cacheDelete } = require('../config/redis');
-const { translateCityNames } = require('./translation');
+const { translateCityNames, translateText } = require('./translation');
 const { getCountryByCode } = require('./countries');
 
 let subdivisionsData = null;
+let allCitiesData = null;
 
 const normalizeForSearch = (value) => {
   if (!value) {
@@ -106,12 +107,139 @@ const matchesSearchTerm = (value, rawLowerQuery, normalizedQuery) => {
   });
 };
 
+const filterCitiesByQuery = (citiesList, query, languageCode) => {
+  if (!query) {
+    return citiesList;
+  }
+
+  const rawLowerQuery = query.toLowerCase();
+  const normalizedQuery = normalizeForSearch(query);
+
+  return citiesList.filter(city => {
+    const originalName = city.originalName || city.name;
+    const matchesOriginal = matchesSearchTerm(originalName, rawLowerQuery, normalizedQuery);
+    const matchesTranslated = matchesSearchTerm(city.name, rawLowerQuery, normalizedQuery);
+    const matchesState = city.stateName && matchesSearchTerm(city.stateName, rawLowerQuery, normalizedQuery);
+    const matchesStateCode = city.stateCode && matchesSearchTerm(city.stateCode, rawLowerQuery, normalizedQuery);
+
+    if (languageCode === 'en') {
+      return matchesOriginal || matchesState || matchesStateCode;
+    }
+
+    return matchesOriginal || matchesTranslated || matchesState || matchesStateCode;
+  });
+};
+
+const searchCitiesGlobal = async (languageCode = 'en', searchQuery) => {
+  const trimmedQuery = searchQuery.trim();
+  const normalizedCacheKeyPart = normalizeForSearch(trimmedQuery) || trimmedQuery.toLowerCase();
+  const cacheKey = `cities_translated:global:${languageCode}:${normalizedCacheKeyPart || 'empty'}`;
+
+  const cached = await cacheGet(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      fromCache: true
+    };
+  }
+
+  const allCities = getAllCitiesFromLocalData();
+  const searchMetadata = {
+    originalQuery: trimmedQuery,
+    resolvedQuery: trimmedQuery,
+    alternateQuery: null
+  };
+
+  let filteredCities = filterCitiesByQuery(allCities, trimmedQuery, languageCode);
+
+  if (
+    filteredCities.length === 0 &&
+    process.env.GOOGLE_CLOUD_API_KEY &&
+    trimmedQuery.length > 0
+  ) {
+    try {
+      const translatedQuery = await translateText(trimmedQuery, 'en', 'auto');
+      if (translatedQuery && translatedQuery.toLowerCase() !== trimmedQuery.toLowerCase()) {
+        const fallbackCities = filterCitiesByQuery(allCities, translatedQuery, 'en');
+        if (fallbackCities.length > 0) {
+          filteredCities = fallbackCities;
+          searchMetadata.resolvedQuery = translatedQuery;
+          searchMetadata.alternateQuery = translatedQuery;
+        }
+      }
+    } catch (error) {
+      console.error('Global city search translation failed:', error.message);
+    }
+  }
+
+  let translatedCities = filteredCities;
+  if (translatedCities.length > 0 && languageCode !== 'en') {
+    try {
+      translatedCities = await translateCityNames(translatedCities, languageCode, 'en');
+    } catch (error) {
+      console.error('Global city name translation failed:', error.message);
+      translatedCities = filteredCities.map(city => ({
+        ...city,
+        originalName: city.name,
+        translationError: true
+      }));
+    }
+  }
+
+  const uniqueCountryCodes = Array.from(
+    new Set(translatedCities.map(city => city.countryCode).filter(Boolean))
+  );
+
+  const result = {
+    language: languageCode,
+    searchQuery: trimmedQuery,
+    resolvedSearchQuery: searchMetadata.resolvedQuery,
+    alternateSearchQuery: searchMetadata.alternateQuery,
+    count: translatedCities.length,
+    cities: translatedCities,
+    countries: uniqueCountryCodes,
+    isGlobalSearch: true,
+    fromCache: false
+  };
+
+  await cacheSet(cacheKey, result, 0);
+  return result;
+};
+
 const loadSubdivisions = () => {
   if (!subdivisionsData) {
     const subdivisionsPath = path.join(__dirname, '../../assets/subdivisions/subdivisions.json');
     subdivisionsData = JSON.parse(fs.readFileSync(subdivisionsPath, 'utf8'));
   }
   return subdivisionsData;
+};
+
+const extractStateCode = (code) => {
+  if (!code) {
+    return null;
+  }
+  const parts = code.split('-');
+  return parts.length > 1 ? parts.slice(1).join('-') : code;
+};
+
+const mapSubdivisionToCity = (subdivision, index) => ({
+  id: index + 1,
+  name: subdivision.name,
+  stateCode: extractStateCode(subdivision.code),
+  stateName: subdivision.name,
+  countryCode: subdivision.country,
+  latitude: null,
+  longitude: null,
+  type: subdivision.type,
+  parent: subdivision.parent || null
+});
+
+const getAllCitiesFromLocalData = () => {
+  if (!allCitiesData) {
+    const subdivisions = loadSubdivisions();
+    allCitiesData = subdivisions.map((subdivision, index) => mapSubdivisionToCity(subdivision, index));
+  }
+  return allCitiesData;
 };
 
 const getCitiesFromLocalData = async (countryCode) => {
@@ -127,16 +255,9 @@ const getCitiesFromLocalData = async (countryCode) => {
       sub => sub.country === countryCode.toUpperCase()
     );
 
-    const cities = countrySubdivisions.map((subdivision, index) => ({
-      id: index + 1,
-      name: subdivision.name,
-      stateCode: subdivision.code.split('-')[1],
-      stateName: subdivision.name,
-      countryCode: subdivision.country,
-      latitude: null,
-      longitude: null,
-      type: subdivision.type
-    }));
+    const cities = countrySubdivisions.map((subdivision, index) =>
+      mapSubdivisionToCity(subdivision, index)
+    );
 
     // Cache empty results for shorter time (1 hour) vs full results (forever)
     const expiration = cities.length === 0 ? 3600 : 0;
@@ -181,26 +302,36 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
       }
     }
 
+    let searchMetadata = {
+      originalQuery: searchQuery || null,
+      resolvedQuery: searchQuery || null,
+      alternateQuery: null
+    };
+
     if (searchQuery) {
-      const lowerQuery = searchQuery.toLowerCase();
-      const normalizedQuery = normalizeForSearch(searchQuery);
-      translatedCities = translatedCities.filter(city => {
-        // Search in original English name
-        const originalName = city.originalName || city.name;
-        const matchesOriginal = matchesSearchTerm(originalName, lowerQuery, normalizedQuery);
-        
-        // Search in translated name (if different from original)
-        const matchesTranslated = languageCode !== 'en' &&
-          matchesSearchTerm(city.name, lowerQuery, normalizedQuery);
-        
-        // Search in state/subdivision name
-        const matchesState = city.stateName && matchesSearchTerm(city.stateName, lowerQuery, normalizedQuery);
+      let filteredCities = filterCitiesByQuery(translatedCities, searchQuery, languageCode);
 
-        // Search in state code (e.g., LB-BA)
-        const matchesStateCode = city.stateCode && matchesSearchTerm(city.stateCode, lowerQuery, normalizedQuery);
+      if (
+        filteredCities.length === 0 &&
+        process.env.GOOGLE_CLOUD_API_KEY &&
+        searchQuery.trim().length > 0
+      ) {
+        try {
+          const translatedQuery = await translateText(searchQuery, 'en', 'auto');
+          if (translatedQuery && translatedQuery.toLowerCase() !== searchQuery.toLowerCase()) {
+            const fallbackCities = filterCitiesByQuery(translatedCities, translatedQuery, 'en');
+            if (fallbackCities.length > 0) {
+              filteredCities = fallbackCities;
+              searchMetadata.resolvedQuery = translatedQuery;
+              searchMetadata.alternateQuery = translatedQuery;
+            }
+          }
+        } catch (error) {
+          console.error('Search query translation failed:', error.message);
+        }
+      }
 
-        return matchesOriginal || matchesTranslated || matchesState || matchesStateCode;
-      });
+      translatedCities = filteredCities;
     }
 
     const result = {
@@ -208,6 +339,8 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
       countryCode: countryCode.toUpperCase(),
       language: languageCode,
       searchQuery: searchQuery,
+      resolvedSearchQuery: searchMetadata.resolvedQuery,
+      alternateSearchQuery: searchMetadata.alternateQuery,
       count: translatedCities.length,
       cities: translatedCities,
       fromCache: false
@@ -226,7 +359,13 @@ const searchCities = async (countryCode, languageCode = 'en', searchQuery) => {
     throw new Error('Search query is required');
   }
 
-  return await getCitiesWithTranslation(countryCode, languageCode, searchQuery.trim());
+  const trimmedQuery = searchQuery.trim();
+
+  if (!countryCode) {
+    return await searchCitiesGlobal(languageCode, trimmedQuery);
+  }
+
+  return await getCitiesWithTranslation(countryCode, languageCode, trimmedQuery);
 };
 
 const getAllCitiesForCountry = async (countryCode, languageCode = 'en') => {
@@ -237,6 +376,8 @@ const clearCityCache = async (countryCode) => {
   try {
     const rawCacheKey = `cities_raw:${countryCode.toLowerCase()}`;
     await cacheDelete(rawCacheKey);
+    allCitiesData = null;
+    subdivisionsData = null;
     
     // Clear all translated cache entries for this country (approximate - clears common languages)
     const languages = ['en', 'ar', 'fr', 'es', 'de', 'it', 'pt', 'ru', 'zh', 'ja'];
@@ -267,6 +408,8 @@ const clearAllCitiesCache = async () => {
       await client.del(allKeys);
       console.log(`Cleared ${allKeys.length} cities cache entries`);
     }
+    allCitiesData = null;
+    subdivisionsData = null;
     
     return {
       success: true,
@@ -286,6 +429,7 @@ module.exports = {
   getCitiesFromLocalData,
   getCitiesWithTranslation,
   searchCities,
+  searchCitiesGlobal,
   getAllCitiesForCountry,
   clearCityCache,
   clearAllCitiesCache

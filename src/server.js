@@ -9,6 +9,7 @@ const { connectRedis } = require('./config/redis');
 const { initializeTranslation } = require('./services/translation');
 const countriesRoutes = require('./routes/countries');
 const citiesRoutes = require('./routes/cities');
+const searchRoutes = require('./routes/search');
 const authMiddleware = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -38,7 +39,8 @@ app.get('/', (req, res) => {
     documentation: '/api/docs',
     endpoints: {
       countries: '/api/countries',
-      cities: '/api/cities'
+      cities: '/api/cities',
+      search: '/search'
     },
     supportedLanguages: [
       'ar', 'bg', 'br', 'cs', 'da', 'de', 'el', 'en', 'eo', 'es', 'et', 'eu',
@@ -50,6 +52,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/countries', countriesRoutes);
 app.use('/api/cities', citiesRoutes);
+app.use('/search', searchRoutes);
 
 app.use(errorHandler);
 

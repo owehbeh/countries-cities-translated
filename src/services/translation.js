@@ -18,7 +18,8 @@ const translateText = async (text, targetLanguage, sourceLanguage = 'en') => {
     throw new Error('Google Cloud Translation API key not configured');
   }
 
-  const cacheKey = `translation:${sourceLanguage}:${targetLanguage}:${text}`;
+  const normalizedSource = !sourceLanguage || sourceLanguage === 'auto' ? 'auto' : sourceLanguage;
+  const cacheKey = `translation:${normalizedSource}:${targetLanguage}:${text}`;
   
   try {
     const cached = await cacheGet(cacheKey);
@@ -26,12 +27,17 @@ const translateText = async (text, targetLanguage, sourceLanguage = 'en') => {
       return cached;
     }
 
-    const response = await axios.post(GOOGLE_TRANSLATE_API_URL, {
+    const requestBody = {
       q: text,
-      source: sourceLanguage,
       target: targetLanguage,
       format: 'text'
-    }, {
+    };
+
+    if (normalizedSource !== 'auto') {
+      requestBody.source = normalizedSource;
+    }
+
+    const response = await axios.post(GOOGLE_TRANSLATE_API_URL, requestBody, {
       params: {
         key: process.env.GOOGLE_CLOUD_API_KEY
       },
