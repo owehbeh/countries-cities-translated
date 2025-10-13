@@ -11,7 +11,7 @@ In today's globalized world, applications need to serve users in their native la
 - Using third-party APIs for every request (costly and dependent on external services)
 - Limiting language support (poor user experience)
 
-**Our Solution:** This API provides an intelligent, cost-effective approach by combining:
+**The Solution:** This API provides an intelligent, cost-effective approach by combining:
 - **Local data storage** for countries and subdivisions in English
 - **On-demand translation** using Google Cloud Translation API
 - **Persistent Redis caching** to translate each term only once
