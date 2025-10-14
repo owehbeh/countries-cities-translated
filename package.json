@@ -4,9 +4,9 @@
   "description": "Multilingual Countries and Cities API with Google Cloud Translation",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "pm2-runtime ecosystem.config.js",
+    "start:single": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "start:pm2": "pm2 start ecosystem.config.js",
     "test": "jest",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
@@ -29,7 +29,8 @@
     "express-rate-limit": "^6.10.0",
     "compression": "^1.7.4",
     "dotenv": "^16.3.1",
-    "axios": "^1.5.0"
+    "axios": "^1.5.0",
+    "pm2": "^5.4.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
