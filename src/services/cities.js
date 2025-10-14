@@ -7,6 +7,9 @@ const { getCountryByCode } = require('./countries');
 let subdivisionsData = null;
 let allCitiesData = null;
 
+const CITY_SEARCH_CACHE_VERSION = 'v2';
+const GLOBAL_CITY_SEARCH_CACHE_VERSION = 'v2';
+
 const normalizeForSearch = (value) => {
   if (!value) {
     return '';
@@ -61,50 +64,110 @@ const levenshteinDistance = (a, b) => {
   return matrix[a.length][b.length];
 };
 
-const matchesSearchTerm = (value, rawLowerQuery, normalizedQuery) => {
+const evaluateMatchScore = (value, rawLowerQuery, normalizedQuery) => {
   if (!value) {
-    return false;
+    return null;
   }
 
-  const lowerValue = value.toString().toLowerCase();
-  if (rawLowerQuery && lowerValue.includes(rawLowerQuery)) {
-    return true;
+  const stringValue = value.toString();
+  const lowerValue = stringValue.toLowerCase();
+
+  if (rawLowerQuery) {
+    if (lowerValue === rawLowerQuery) {
+      return 0;
+    }
+    if (lowerValue.startsWith(rawLowerQuery)) {
+      return 0.2;
+    }
+    if (rawLowerQuery.length >= 3 && lowerValue.includes(rawLowerQuery)) {
+      return 0.4;
+    }
   }
 
-  const normalizedValue = normalizeForSearch(value);
+  const normalizedValue = normalizeForSearch(stringValue);
   if (!normalizedValue) {
-    return false;
+    return null;
   }
 
-  if (normalizedQuery && normalizedValue.includes(normalizedQuery)) {
-    return true;
+  if (normalizedQuery) {
+    if (normalizedValue === normalizedQuery) {
+      return 0.3;
+    }
+    if (normalizedValue.startsWith(normalizedQuery)) {
+      return 0.45;
+    }
+    if (normalizedQuery.length >= 3 && normalizedValue.includes(normalizedQuery)) {
+      return 0.6;
+    }
   }
 
-  if (!normalizedQuery || normalizedQuery.length < 4) {
-    return false;
+  if (!normalizedQuery || normalizedQuery.length < 2) {
+    return null;
   }
 
   const tokens = normalizedValue.split(' ').filter(Boolean);
-  const firstLetter = normalizedQuery[0];
-  const maxAllowedDistance = (length) => {
-    if (length <= 3) {
-      return 0;
-    }
-    return Math.max(2, Math.ceil(Math.max(length, normalizedQuery.length) * 0.4));
-  };
+  let bestScore = null;
 
-  return tokens.some(token => {
+  for (const token of tokens) {
     if (!token) {
-      return false;
-    }
-
-    if (token[0] !== firstLetter) {
-      return false;
+      continue;
     }
 
     const distance = levenshteinDistance(token, normalizedQuery);
-    return distance <= maxAllowedDistance(token.length);
-  });
+    const maxLength = Math.max(token.length, normalizedQuery.length);
+    if (maxLength === 0) {
+      continue;
+    }
+
+    const normalizedDistance = distance / maxLength;
+    if (normalizedDistance > 0.5) {
+      continue;
+    }
+
+    const score = 1 + normalizedDistance;
+    if (bestScore === null || score < bestScore) {
+      bestScore = score;
+    }
+  }
+
+  return bestScore;
+};
+
+const calculateCityMatchScore = (city, rawLowerQuery, normalizedQuery, languageCode) => {
+  const scores = [];
+
+  const originalName = city.originalName || city.name;
+  const originalScore = evaluateMatchScore(originalName, rawLowerQuery, normalizedQuery);
+  if (originalScore !== null) {
+    scores.push(originalScore);
+  }
+
+  if (languageCode !== 'en') {
+    const translatedScore = evaluateMatchScore(city.name, rawLowerQuery, normalizedQuery);
+    if (translatedScore !== null) {
+      scores.push(translatedScore + 0.1);
+    }
+  }
+
+  if (city.stateName) {
+    const stateScore = evaluateMatchScore(city.stateName, rawLowerQuery, normalizedQuery);
+    if (stateScore !== null) {
+      scores.push(stateScore + 0.5);
+    }
+  }
+
+  if (city.stateCode) {
+    const codeScore = evaluateMatchScore(city.stateCode, rawLowerQuery, normalizedQuery);
+    if (codeScore !== null) {
+      scores.push(codeScore + 0.75);
+    }
+  }
+
+  if (scores.length === 0) {
+    return null;
+  }
+
+  return Math.min(...scores);
 };
 
 const filterCitiesByQuery = (citiesList, query, languageCode) => {
@@ -115,25 +178,32 @@ const filterCitiesByQuery = (citiesList, query, languageCode) => {
   const rawLowerQuery = query.toLowerCase();
   const normalizedQuery = normalizeForSearch(query);
 
-  return citiesList.filter(city => {
-    const originalName = city.originalName || city.name;
-    const matchesOriginal = matchesSearchTerm(originalName, rawLowerQuery, normalizedQuery);
-    const matchesTranslated = matchesSearchTerm(city.name, rawLowerQuery, normalizedQuery);
-    const matchesState = city.stateName && matchesSearchTerm(city.stateName, rawLowerQuery, normalizedQuery);
-    const matchesStateCode = city.stateCode && matchesSearchTerm(city.stateCode, rawLowerQuery, normalizedQuery);
+  const matchedCities = [];
 
-    if (languageCode === 'en') {
-      return matchesOriginal || matchesState || matchesStateCode;
+  for (const city of citiesList) {
+    const score = calculateCityMatchScore(city, rawLowerQuery, normalizedQuery, languageCode);
+    if (score !== null) {
+      matchedCities.push({
+        ...city,
+        matchScore: score
+      });
     }
+  }
 
-    return matchesOriginal || matchesTranslated || matchesState || matchesStateCode;
+  matchedCities.sort((a, b) => {
+    if (a.matchScore === b.matchScore) {
+      return (a.name || '').localeCompare(b.name || '');
+    }
+    return a.matchScore - b.matchScore;
   });
+
+  return matchedCities;
 };
 
 const searchCitiesGlobal = async (languageCode = 'en', searchQuery) => {
   const trimmedQuery = searchQuery.trim();
   const normalizedCacheKeyPart = normalizeForSearch(trimmedQuery) || trimmedQuery.toLowerCase();
-  const cacheKey = `cities_translated:global:${languageCode}:${normalizedCacheKeyPart || 'empty'}`;
+  const cacheKey = `cities_translated:global:${GLOBAL_CITY_SEARCH_CACHE_VERSION}:${languageCode}:${normalizedCacheKeyPart || 'empty'}`;
 
   const cached = await cacheGet(cacheKey);
   if (cached) {
@@ -190,13 +260,15 @@ const searchCitiesGlobal = async (languageCode = 'en', searchQuery) => {
     new Set(translatedCities.map(city => city.countryCode).filter(Boolean))
   );
 
+  const responseCities = stripMatchScore(translatedCities);
+
   const result = {
     language: languageCode,
     searchQuery: trimmedQuery,
     resolvedSearchQuery: searchMetadata.resolvedQuery,
     alternateSearchQuery: searchMetadata.alternateQuery,
-    count: translatedCities.length,
-    cities: translatedCities,
+    count: responseCities.length,
+    cities: responseCities,
     countries: uniqueCountryCodes,
     isGlobalSearch: true,
     fromCache: false
@@ -242,6 +314,15 @@ const getAllCitiesFromLocalData = () => {
   return allCitiesData;
 };
 
+const stripMatchScore = (cities) => 
+  cities.map(city => {
+    if (!city || typeof city !== 'object') {
+      return city;
+    }
+    const { matchScore, ...rest } = city;
+    return rest;
+  });
+
 const getCitiesFromLocalData = async (countryCode) => {
   try {
     const cacheKey = `cities_raw:${countryCode.toLowerCase()}`;
@@ -277,7 +358,7 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
       throw new Error(`Country not found: ${countryCode}`);
     }
 
-    const cacheKey = `cities_translated:${countryCode.toLowerCase()}:${languageCode}:${searchQuery || 'all'}`;
+    const cacheKey = `cities_translated:${CITY_SEARCH_CACHE_VERSION}:${countryCode.toLowerCase()}:${languageCode}:${searchQuery || 'all'}`;
     const cached = await cacheGet(cacheKey);
     if (cached) {
       return {
@@ -334,6 +415,8 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
       translatedCities = filteredCities;
     }
 
+    const responseCities = stripMatchScore(translatedCities);
+
     const result = {
       country: country,
       countryCode: countryCode.toUpperCase(),
@@ -341,8 +424,8 @@ const getCitiesWithTranslation = async (countryCode, languageCode = 'en', search
       searchQuery: searchQuery,
       resolvedSearchQuery: searchMetadata.resolvedQuery,
       alternateSearchQuery: searchMetadata.alternateQuery,
-      count: translatedCities.length,
-      cities: translatedCities,
+      count: responseCities.length,
+      cities: responseCities,
       fromCache: false
     };
 
@@ -381,9 +464,10 @@ const clearCityCache = async (countryCode) => {
     
     // Clear all translated cache entries for this country (approximate - clears common languages)
     const languages = ['en', 'ar', 'fr', 'es', 'de', 'it', 'pt', 'ru', 'zh', 'ja'];
-    const clearPromises = languages.map(lang => 
-      cacheDelete(`cities_translated:${countryCode.toLowerCase()}:${lang}:all`)
-    );
+    const clearPromises = languages.flatMap(lang => ([
+      cacheDelete(`cities_translated:${countryCode.toLowerCase()}:${lang}:all`),
+      cacheDelete(`cities_translated:${CITY_SEARCH_CACHE_VERSION}:${countryCode.toLowerCase()}:${lang}:all`)
+    ]));
     await Promise.all(clearPromises);
     
     return true;
